@@ -31,6 +31,7 @@ modules:
       - install -Dm644 com.todoist.Todoist.metainfo.xml "${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml"
     sources:
       - type: extra-data
+        only-arches: [x86_64]
         filename: todoist.snap
         url: https://api.snapcraft.io/api/v1/snaps/download/pP800io06HKwwkUmX8gDG1pFCfsinLHY_1359.snap
         sha256: befb451f257dcbd314d59de296b7339290586006f6a2255a92cb2e8838381998
@@ -39,7 +40,17 @@ modules:
           type: snapcraft
           name: todoist
           channel: stable
+      - type: extra-data
+        only-arches: [aarch64]
+        filename: todoist.AppImage
+        url: https://electron-dl.todoist.net/linux/Todoist-linux-9.30.0-arm64-latest.AppImage
+        sha256: ef18cf1125d6dec1c6c54ff17ee4ce6037e1e6c2cf4f09b8c6c824268c030d5e
+        size: 131550634
+        x-checker-data:
+          type: electron-updater
+          url: https://electron-dl.todoist.net/linux/latest-linux-arm64.yml
       - type: script
+        only-arches: [x86_64]
         dest-filename: apply_extra
         commands:
           # TODO: Spotify simply includes -no-progress here and does not create
@@ -49,6 +60,21 @@ modules:
           # TODO: This moves in a lot of junk too
           - mv squashfs-root todoist
           - touch todoist/chrome-sandbox && chmod +x todoist/chrome-sandbox
+      - type: script
+        only-arches: [aarch64]
+        dest-filename: apply_extra
+        commands:
+          - set -eu
+          # Read the ELF64 section table to locate the appended SquashFS.
+          # The AppImage runtime itself requires the unversioned libz.so.
+          - shoff=$(od -An -tu8 -j40 -N8 todoist.AppImage)
+          - shentsize=$(od -An -tu2 -j58 -N2 todoist.AppImage)
+          - shnum=$(od -An -tu2 -j60 -N2 todoist.AppImage)
+          - unsquashfs -no-progress -o "$((shoff + shentsize * shnum))" todoist.AppImage 1>/dev/null
+          - rm todoist.AppImage
+          # Match the Snap layout used by todoist.sh.
+          - mkdir todoist
+          - mv squashfs-root todoist/app
       - type: file
         path: todoist.sh
       - type: file
