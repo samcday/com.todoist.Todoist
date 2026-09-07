@@ -2,3 +2,5 @@
 appdir/
 repo/
 *.flatpak
+.work/
+__pycache__/
