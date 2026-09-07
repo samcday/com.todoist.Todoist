@@ -1,0 +1,114 @@
+name: Publish Todoist ARM64
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '23 21 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even when the app and base are unchanged
+        type: boolean
+        default: false
+
+concurrency:
+  group: todoist-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml shellcheck
+      - run: python3 -m unittest discover -s tests -v
+      - run: shellcheck scripts/build-repository.sh
+
+  publish:
+    if: github.repository == 'samcday/com.todoist.Todoist' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder ostree gnupg python3-yaml curl xvfb xauth dbus-x11
+          # Ubuntu's runner restriction blocks Flatpak's unprivileged sandbox.
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Check official release and supported runtime
+        run: |
+          python3 scripts/sync-runtime.py
+          python3 scripts/update-todoist.py --download-dir .work/downloads --metainfo com.todoist.Todoist.metainfo.xml
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+      - name: Decide whether a new build is needed
+        id: plan
+        env:
+          FORCE_BUILD: ${{ inputs.force == true }}
+        run: |
+          runtime=$(python3 -c 'import yaml; print(yaml.safe_load(open("com.todoist.Todoist.yaml"))["base-version"])')
+          base_commit=$(flatpak remote-info --user --arch=aarch64 --show-commit flathub "org.electronjs.Electron2.BaseApp//$runtime")
+          args=()
+          if [[ "$FORCE_BUILD" == true ]]; then args+=(--force); fi
+          python3 scripts/plan-build.py --base-commit "$base_commit" --github-output "$GITHUB_OUTPUT" "${args[@]}"
+      - name: Import the dedicated repository signing key
+        if: steps.plan.outputs.build == 'true'
+        env:
+          FLATPAK_SIGNING_KEY: ${{ secrets.FLATPAK_SIGNING_KEY }}
+        run: |
+          signing_home=$(mktemp -d "$RUNNER_TEMP/todoist-signing.XXXXXX")
+          chmod 700 "$signing_home"
+          printf '%s' "$FLATPAK_SIGNING_KEY" | gpg --homedir "$signing_home" --batch --import
+          echo "SIGNING_HOME=$signing_home" >> "$GITHUB_ENV"
+      - name: Build, sign, and test the Flatpak repository
+        if: steps.plan.outputs.build == 'true'
+        env:
+          BASE_COMMIT: ${{ steps.plan.outputs.base_commit }}
+          PUBLISH_URL: https://samcday.github.io/com.todoist.Todoist
+          BOOTSTRAP: ${{ hashFiles('.automation/state.json') == '' }}
+        run: bash scripts/build-repository.sh
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        if: steps.plan.outputs.build == 'true'
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        if: steps.plan.outputs.build == 'true'
+        with:
+          path: .work/site
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        if: steps.plan.outputs.build == 'true'
+        id: deployment
+      - name: Record the successful release check
+        env:
+          BASE_COMMIT: ${{ steps.plan.outputs.base_commit }}
+        run: |
+          python3 scripts/plan-build.py --base-commit "$BASE_COMMIT" --record
+          git add com.todoist.Todoist.yaml com.todoist.Todoist.metainfo.xml .automation/state.json
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Record verified Todoist ARM64 update check'
+          git push origin HEAD:master
+      - name: Remove temporary signing key
+        if: always() && env.SIGNING_HOME != ''
+        run: |
+          gpgconf --homedir "$SIGNING_HOME" --kill all || true
+          rm -rf -- "$SIGNING_HOME"
