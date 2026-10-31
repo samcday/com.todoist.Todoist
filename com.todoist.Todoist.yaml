@@ -43,9 +43,9 @@ modules:
       - type: extra-data
         only-arches: [aarch64]
         filename: todoist.AppImage
-        url: https://electron-dl.todoist.net/linux/Todoist-linux-9.35.0-arm64-latest.AppImage
-        sha256: 69b3ba8243084a717635410a50fb6f7dbcd28f103580dda04990164ed246afbe
-        size: 135812326
+        url: https://electron-dl.todoist.net/linux/Todoist-linux-9.36.1-arm64-latest.AppImage
+        sha256: 18f5423dba8cf8ec083ab44abc3334865451da9e6ef9c257551e2fdc1cfba71f
+        size: 135816391
         x-checker-data:
           type: electron-updater
           url: https://electron-dl.todoist.net/linux/latest-linux-arm64.yml

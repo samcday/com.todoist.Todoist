@@ -60,6 +60,7 @@
     <update_contact>raimue_AT_codingfarm.de</update_contact>
     <content_rating type="oars-1.1"/>
     <releases>
+        <release version="9.36.1" date="2026-10-30"/>
         <release version="9.35.0" date="2026-10-28"/>
         <release version="9.33.1" date="2026-10-26"/>
         <release version="9.32.0" date="2026-10-23"/>
